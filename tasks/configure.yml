@@ -1,0 +1,69 @@
+---
+- name: Ensure configuration directories exist.
+  file:
+    path: "{{ item }}"
+    state: directory
+    follow: true
+  with_flattened:
+    - "{{ php_conf_paths }}"
+    - "{{ php_extension_conf_paths }}"
+
+- name: Place PHP configuration file in place.
+  template:
+    src: php.ini.j2
+    dest: "{{ item }}/php.ini"
+    owner: root
+    group: root
+    mode: 0644
+  with_items: "{{ php_conf_paths }}"
+  when: php_use_managed_ini
+
+- name: Place PHP-FPM configuration file in place.
+  template:
+    src: php-fpm.conf.j2
+    dest: "{{ item }}/php-fpm.conf"
+    owner: root
+    group: root
+    mode: 0644
+  with_items: "{{ php_fpm_conf_path }}"
+
+- name: Create log directory
+  file:
+    path: /var/log/php-fpm
+    state: directory
+    owner: www-data
+    group: www-data
+
+- name: Looking for a php files in logrotate path
+  find:
+    paths: /etc/logrotate.d/
+    pattern: "php*"
+    file_type: file
+  register: php_files
+
+- name: Fix path in default logrotate
+  lineinfile:
+    path: "{{ item.path }}"
+    regexp: '^/var/log/'
+    line: '/var/log/php-fpm/*.log {'
+  with_items: "{{ php_files.files }}"
+
+- name: Restarting PHP-FPM to avoid errors in next tasks
+  systemd:
+    name: "{{ php_fpm_daemon }}"
+    state: restarted
+    daemon_reload: yes
+
+- name: Fixing permissions of PHP-FPM socket
+  file:
+    path: "{{ php_fpm_listen }}"
+    state: file
+    owner: www-data
+    group: www-data
+    mode: 0666
+
+- name: Remove APCu config file
+  file:
+    path: "/etc/php/7.1/mods-available/{{ php_apc_conf_filename }}"
+    state: absent
+  notify: restart webserver    
